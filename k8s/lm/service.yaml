@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: lm-service
+  labels:
+    app: lm
+spec:
+  type: ClusterIP
+  selector:
+    app: lm
+  ports:
+    - name: http
+      port: 8000        # service port
+      targetPort: 8000  # containerPort
+      protocol: TCP

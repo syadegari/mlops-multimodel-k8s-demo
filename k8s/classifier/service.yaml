@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: classifier-service
+  labels:
+    app: classifier
+spec:
+  type: ClusterIP
+  selector:
+    app: classifier
+  ports:
+    - name: http
+      port: 8000        # service port
+      targetPort: 8000  # containerPort
+      protocol: TCP

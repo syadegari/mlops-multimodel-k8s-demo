@@ -1,0 +1,36 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: lm-deployment
+  labels:
+    app: lm
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: lm
+  template:
+    metadata:
+      labels:
+        app: lm
+    spec:
+      containers:
+        - name: lm
+          image: lm-service:v1
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: MODEL_NAME
+              value: "erwanf/gpt2-mini"
+            - name: MAX_TOTAL_TOKENS
+              value: "256"
+            - name: ARTIFICIAL_CPU_SEC
+              value: "0.0"
+          ports:
+            - containerPort: 8000
+          resources:
+            requests:
+              cpu: "500m"
+              memory: "512Mi"
+            limits:
+              cpu: "1000m"
+              memory: "1Gi"
