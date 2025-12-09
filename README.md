@@ -32,17 +32,19 @@
       - [8.9.3 Sample output](#893-sample-output)
     - [8.10 Cleanup](#810-cleanup)
 
-# MLOps Demo – Multi-Model Inference on Kubernetes 
+# MLOps Demo – Multi-Model Inference on Kubernetes
 
 ## 1. Objectives
 
 The following goals are considered for this demo:
-  - Design, deploy and operate scalable inference services for ML models.
-  - Package each model model as a separate, reproducible container.
-  - Run them on a Kubernetes cluster with autoscaling and monitoring.
-  - Create and expose clean APIs that can be used by non-ML users.
-  - Versioning of trained models and ability to roll back as well as providing metrics and logging.
-This demo is a smale-scale, single node minikube, but the overall architecture is flexible enough that can be scaled to production node/hardware.
+
+- Design, deploy, and operate scalable inference services for ML models.
+- Package each model as a separate, reproducible container.
+- Run them on a Kubernetes cluster with autoscaling and monitoring.
+- Create and expose clean APIs that can be used by non-ML users.
+- Provide model versioning, the ability to roll back, and basic metrics and logging.
+
+This demo is a small-scale, single-node minikube cluster, but the overall architecture is flexible enough that it can be scaled to production-grade clusters and hardware.
 
 ---
 
@@ -50,15 +52,15 @@ This demo is a smale-scale, single node minikube, but the overall architecture i
 
 ### Models
 
-State of art models and/or heavy models are deliberately avoided to focus on MLOps patterns and constrast between a heavy and lightweight model.
+State-of-the-art or very large models are deliberately avoided to focus on MLOps patterns and the contrast between a heavier and a lightweight model.
 
-- **Model A – Causal LM service (simulating a heavy model)**\
-  A small **autoregressive language model** (e.g. `gpt2` or another small `AutoModelForCausalLM` from Hugging Face) served via FastAPI.
+- **Model A – Causal LM service (simulating a heavy model)**  
+  A small **autoregressive language model** (e.g. `erwanf/gpt2-mini` or another small `AutoModelForCausalLM` from Hugging Face) served via FastAPI.
 
-  - Task: answer short text questions or generate short text replies given an input prompt (capped to \~256 tokens total).
+  - Task: answer short text questions or generate short text replies given an input prompt (capped to ~256 tokens total).
 
-- **Model B – sklearn classifier on MNIST (Simulating a light model)**\
-  A lightweight **scikit-learn classifier** (e.g. RandomForestClassifier) trained on the MNIST digits dataset.
+- **Model B – sklearn classifier on MNIST (simulating a light model)**  
+  A lightweight **scikit-learn classifier** (e.g. `RandomForestClassifier`) trained on the MNIST digits dataset.
 
   - Task: classify an input image (or pre-extracted features) as one of the 10 MNIST digits.
 
@@ -67,21 +69,18 @@ State of art models and/or heavy models are deliberately avoided to focus on MLO
 ## 3. High-Level Overview
 
 - A single **Kubernetes cluster** (minikube) running on a local machine.
-- Two independent microservices each in its own pod:
+- Two independent microservices, each deployed with its own `Deployment` and `Service`:
   - `lm-service` (causal LM, heavy image, CPU-only for the demo).
   - `classifier-service` (sklearn model, very small image).
-
 - For each service there is a dedicated set of Kubernetes resources:
-  - one Docker image (lm-service:v1, classifier-service:v1).
-  - one Deployment (with resource requests/limits).
-  - one Service of type ClusterIP.
+  - one Docker image (`lm-service:v1`, `classifier-service:v1`),
+  - one `Deployment` (with resource requests/limits),
+  - one `Service` of type `ClusterIP`,
   - one Horizontal Pod Autoscaler (HPA) driven by CPU utilisation.
-
-- The classifier service mounts the host models/ directory into the pod as /models, so the trained `.joblib` artifacts act as a simple local model registry; the `MODEL_PATH` environment variable selects which artifact to load at startup.
-
+- The classifier service mounts the host `models/` directory into the pod as `/models`, so the trained `.joblib` artifacts act as a simple local model registry; the `MODEL_PATH` environment variable selects which artifact to load at startup.
 - Access from the host machine is via `kubectl port-forward` to each Service.
 
-This design aschieves isolation, independent scaling, and clear separation of responsibilities.
+This design achieves isolation, independent scaling, and clear separation of responsibilities.
 
 ---
 
@@ -89,7 +88,7 @@ This design aschieves isolation, independent scaling, and clear separation of re
 
 ### 4.1 Shared parts of the design
 
-- Each model lives in its own Docker image and is inferrence only.
+- Each model lives in its own Docker image and is inference-only.
 - Build arguments or environment variables carry the model version.
 - Images are tagged: `lm-service:v1`, `lm-service:v2`, `classifier-service:v1`, etc.
 
@@ -99,7 +98,7 @@ This design aschieves isolation, independent scaling, and clear separation of re
 
   ```Dockerfile
   FROM huggingface/transformers-pytorch-cpu
-  RUN pip install fastapi uvicorn[standard]
+  RUN pip install fastapi uvicorn[standard] transformers
   ```
 
 - The image:
@@ -119,14 +118,14 @@ This design aschieves isolation, independent scaling, and clear separation of re
 
 - Runtime model selection via mounted volume:
 
-  - At runtime, Kubernetes mounts a host directory (e.g. `./models/` directory) into the pod at `/models` (as a simple model registry).
+  - At runtime, Kubernetes mounts a host directory (e.g. the `./models/` directory) into the pod at `/models` (as a simple model registry).
   - An environment variable (e.g. `MODEL_PATH`) tells the app which file inside the mounted directory to load.
-  - To switch models, we need to change `MODEL_PATH` in the Deployment (e.g. to `/models/mnist_rf_v2.joblib`)
+  - To switch models, change `MODEL_PATH` in the Deployment (e.g. to `/models/mnist_rf_v2.joblib`).
 
 - The service exposes endpoints:
 
   - `GET /healthz` – health check.
-  - `POST /predict` – accepts simple feature vectors and returns a class + probability.
+  - `POST /predict` – accepts simple feature vectors and returns a class + probability distribution.
 
 ---
 
@@ -136,15 +135,22 @@ This design aschieves isolation, independent scaling, and clear separation of re
 
 For each service (`lm-service`, `classifier-service`):
 
-- `Deployment` and `service` specifying:
-  - Container image + tag.
-  - Resource requests and limits (more CPU/memory for `lm-service`).
-  - Environment variables, including `MODEL_VERSION`.
+- a `Deployment` specifying:
+  - container image + tag,
+  - resource requests and limits (e.g. more CPU/memory for `lm-service`),
+  - environment variables for runtime configuration (e.g. `MODEL_PATH`, `MODEL_NAME`, `MAX_TOTAL_TOKENS`, `ARTIFICIAL_CPU_SEC`);
+- a `Service` of type `ClusterIP` exposing the HTTP API inside the cluster.
 
 ### 5.2 Horizontal Pod Autoscaler (HPA)
 
-- Configure an HPA for each `Deployment` based on CPU utilization:
+- An HPA is configured for each `Deployment` based on CPU utilization:
   - Example for `classifier-service`: target 70% CPU, min 1 pod, max 5 pods.
+
+This lets us demonstrate:
+
+- The lightweight sklearn service can scale rapidly due to its small image and quick startup.
+- The causal LM service is heavier per request and still scales based on CPU.
+- The two services are scaled independently.
 
 ---
 
@@ -152,15 +158,20 @@ For each service (`lm-service`, `classifier-service`):
 
 ### 6.1 Artificial Load
 
-In order to observe Horizontal Pod Autoscaling (HPA), we need to inject artificial load and add basic observability. This is managed by two scripts `load_test_classifier.py` and `load_test_lm.py` for each deployed pod. Each script adds a time sleep in the request handler and performs a small dummy CPU loop that can be controlled with `ARTIFICIAL_CPU_LOAD` that is located in `deployment.yaml` of each pod, respectively.
+In order to observe Horizontal Pod Autoscaling (HPA), we inject artificial load and add basic observability.
+
+- Two client scripts, `load_test_classifier.py` and `load_test_lm.py`, send concurrent HTTP requests to the services.
+- On the server side, each service can perform a small CPU-bound loop per request, controlled by the `ARTIFICIAL_CPU_SEC` environment variable configured in the corresponding `deployment.yaml`.
+
+By combining higher request rates in the load test with `ARTIFICIAL_CPU_SEC`, we can reliably push CPU utilisation above the HPA target, even on small hardware.
 
 ### 6.2 Metrics & Logging
 
-- Each load test script measures the following (application level) metrics:
-  - Request latency (start/end timestamps).
-  - Request count, error count.
-- Kubernetes-level metrics (CPU and memory usage) can be measured with `kubectl top pods`
-- Structured JSON logs from FastAPI (request id, path, latency, status).
+- Each load test script measures simple application-level metrics:
+  - request latency (start/end timestamps),
+  - request count and error count.
+- Kubernetes-level metrics (CPU and memory usage) can be inspected with `kubectl top pods`.
+- The services emit structured JSON logs from FastAPI (path, method, latency, status), which can be aggregated if needed.
 
 ---
 
@@ -191,7 +202,7 @@ This section summarises the concrete steps to reproduce the demo on a fresh mach
 - Linux or macOS host with:
   - Python 3.10/3.11 and `pip`
   - Docker
-  - `minikube` 
+  - `minikube`
   - `kubectl`
   - `jq` (for pretty-printing JSON; optional but handy)
 - Sufficient resources (the examples below assume roughly `--cpus=2 --memory=16000` for minikube).
@@ -355,7 +366,7 @@ You should see a `200` response and a short generated continuation of the prompt
 
 The goal here is to drive enough load through `classifier-service` to trigger CPU-based autoscaling of the `classifier-deployment` while keeping the behaviour understandable.
 
-1. **Ensure artificial CPU load is configured** in `k8s/classifier/deployment.yaml` (inside the container `env` section):
+1. Ensure artificial CPU load is configured in `k8s/classifier/deployment.yaml` (inside the container `env` section):
 
    ```yaml
    env:
@@ -373,14 +384,14 @@ The goal here is to drive enough load through `classifier-service` to trigger CP
    kubectl get pods
    ```
 
-2. **Port-forward the classifier service** (if not already running):
+2. Port-forward the classifier service (if not already running):
 
    ```bash
    # Terminal A
    kubectl port-forward svc/classifier-service 8000:8000
    ```
 
-3. **Start the load generator** in another terminal:
+3. Start the load generator in another terminal:
 
    ```bash
    python clients/load_test_classifier.py \
@@ -392,7 +403,7 @@ The goal here is to drive enough load through `classifier-service` to trigger CP
 
    This spawns 40 worker threads, each repeatedly sending MNIST-derived feature vectors to `/predict` for two minutes.
 
-4. **Watch the autoscaler and pod metrics** in parallel:
+4. Watch the autoscaler and pod metrics in parallel:
 
    ```bash
    # Terminal C: HPA behaviour
@@ -402,20 +413,19 @@ The goal here is to drive enough load through `classifier-service` to trigger CP
    kubectl top pods
    ```
 
-Expected behaviour:
+Expected behaviour (see also the sample output in 8.9.3):
 
 - Initially, a single classifier pod handles all traffic; CPU rises well above the 70% target.
-- `classifier-hpa` transitions from `cpu: 0%/70%` to values like `cpu: 150%/70%`.
-- The HPA scales `classifier-deployment` from 1 replica up to 2–3 (depending on configuration).
-- After the load test finishes, CPU utilization drops and the HPA eventually scales back down to a single replica.
+- `classifier-hpa` reports values such as `cpu: 150%/70%` and scales the deployment from 1 replica up to 2–3.
+- After the load test finishes, CPU utilisation drops and the HPA eventually scales back down.
 
 This demonstrates that a lightweight model service can be scaled horizontally to cope with increased traffic, and that the application includes explicit knobs (`ARTIFICIAL_CPU_SEC`, load generator concurrency) to make the scaling behaviour observable on small hardware.
 
 #### 8.9.2 LM autoscaling demo
 
-The goal here is to show that the LM service also autosscales, but with very different characteristics: lower RPS, heavier per-request cost, and (likely) more pronounced cold-start effects.
+The goal here is to show that the LM service also autoscales, but with very different characteristics: lower RPS, heavier per-request cost, and more pronounced cold-start effects.
 
-1. **Configure LM artificial CPU load (optional)** in `k8s/lm/deployment.yaml`:
+1. Configure LM artificial CPU load (optional) in `k8s/lm/deployment.yaml`:
 
    ```yaml
    env:
@@ -435,14 +445,14 @@ The goal here is to show that the LM service also autosscales, but with very dif
    kubectl get pods
    ```
 
-2. **Port-forward the LM service** (if not already running):
+2. Port-forward the LM service (if not already running):
 
    ```bash
    # Terminal B
    kubectl port-forward svc/lm-service 8100:8000
    ```
 
-3. **Optionally warm up the model** with a few manual requests to reduce early timeouts:
+3. Optionally warm up the model with a few manual requests to reduce early timeouts:
 
    ```bash
    python - << 'EOF'
@@ -457,7 +467,7 @@ The goal here is to show that the LM service also autosscales, but with very dif
    EOF
    ```
 
-4. **Run the LM load generator** with modest concurrency:
+4. Run the LM load generator with modest concurrency:
 
    ```bash
    python clients/load_test_lm.py \
@@ -469,28 +479,28 @@ The goal here is to show that the LM service also autosscales, but with very dif
 
    Higher concurrency (e.g. 5–10) is possible but on a 2 vCPU minikube node it quickly leads to request timeouts, which is interesting to observe but less visually clean for a short demo.
 
-5. **Observe HPA and pod metrics** as before:
+5. Observe HPA and pod metrics as before:
 
    ```bash
    kubectl get hpa -w
    kubectl top pods
    ```
 
-Expected behaviour:
+Expected behaviour (see also the sample output in 8.9.3):
 
 - Even at low RPS (around 1 req/s), each `/generate` call is expensive enough on CPU that LM pod CPU utilization climbs above the 70% target.
 - `lm-hpa` scales the `lm-deployment` from 1 to up to 3 replicas.
 - New replicas must also load the model, leading to noticeable cold-start effects (longer latency, potential initial timeouts) before stabilising.
-- After the load test, utilization drops and the HPA eventually scales back down to a single replica.
+- After the load test, utilization drops and the HPA eventually scales back down.
 
 The contrast with the classifier service is intentional and illustrates how different model profiles (lightweight sklearn vs heavy LM) interact with the same autoscaling mechanisms.
 
 #### 8.9.3 Sample output
 
-On my local machine, I get the following scaling behavior when running both autoscaling demos together:
+On a local machine, running both autoscaling demos together produces output similar to (taken from my test machine):
 
-```
-> kubectl get hpa -w
+```bash
+kubectl get hpa -w
 NAME             REFERENCE                          TARGETS       MINPODS   MAXPODS   REPLICAS   AGE
 classifier-hpa   Deployment/classifier-deployment   cpu: 0%/70%   1         5         1          4d5h
 lm-hpa           Deployment/lm-deployment           cpu: 0%/70%   1         3         1          4d
@@ -510,6 +520,14 @@ classifier-hpa   Deployment/classifier-deployment   cpu: 0%/70%     1         5 
 lm-hpa           Deployment/lm-deployment           cpu: 0%/70%     1         3         1          4d
 classifier-hpa   Deployment/classifier-deployment   cpu: 0%/70%     1         5         1          4d5h
 ```
+
+There are a couple of points in the above sample output to notice:
+
+- Entries like `cpu: 162%/70%` or `cpu: 200%/70%` show that a deployment is significantly above its target CPU utilisation, which triggers the HPA to scale up.
+- When `REPLICAS` jumps from `1` to `3` for `classifier-hpa` or `lm-hpa`, that is the autoscaler adding pods.
+- Later lines with `cpu: 0%/70%` and `REPLICAS` returning to `1` show the scale-down phase after the load tests have finished.
+
+This sample ties together the expected behaviours described in 8.9.1 and 8.9.2.
 
 ---
 
@@ -533,20 +551,3 @@ minikube stop
 
 The trained model artifacts under `models/` are kept, acting as a simple local model registry that can be reused in future runs or extended towards a more formal registry-based workflow.
 
-To tear down the resources created during the demo:
-
-```bash
-# Delete K8s resources
-kubectl delete -f k8s/classifier/hpa.yaml
-kubectl delete -f k8s/classifier/service.yaml
-kubectl delete -f k8s/classifier/deployment.yaml
-
-kubectl delete -f k8s/lm/hpa.yaml
-kubectl delete -f k8s/lm/service.yaml
-kubectl delete -f k8s/lm/deployment.yaml
-
-# (Optional) stop minikube
-minikube stop
-```
-
-The trained model artifacts under `models/` are kept, acting as a simple local model registry that can be reused in future runs.
