@@ -3,6 +3,8 @@
   - [2. Scenario Overview](#2-scenario-overview)
     - [Models](#models)
   - [3. High-Level Overview](#3-high-level-overview)
+    - [3.1 Architecture diagram](#31-architecture-diagram)
+    - [3.2 Repository layout](#32-repository-layout)
   - [4. Containers](#4-containers)
     - [4.1 Shared parts of the design](#41-shared-parts-of-the-design)
     - [4.2 Causal LM Service Image (Heavy)](#42-causal-lm-service-image-heavy)
@@ -81,6 +83,83 @@ State-of-the-art or very large models are deliberately avoided to focus on MLOps
 - Access from the host machine is via `kubectl port-forward` to each Service.
 
 This design achieves isolation, independent scaling, and clear separation of responsibilities.
+
+### 3.1 Architecture diagram
+
+```mermaid
+flowchart LR
+  subgraph Clients
+    QC[clients/query_classifier.py]
+    LC[clients/load_test_classifier.py]
+    LL[clients/load_test_lm.py]
+  end
+
+  subgraph "Kubernetes cluster (minikube)"
+    subgraph Classifier
+      SvcC["classifier-service <br> K8s Service (ClusterIP)"]
+      DepC["classifier-deployment <br> (1&hellip;5 pods)"]
+      HpaC{classifier-hpa <br> CPU-based HPA}
+    end
+
+    subgraph LM
+      SvcL["lm-service <br> K8s Service (ClusterIP)"]
+      DepL["lm-deployment <br> (1&hellip;3 pods)"]
+      HpaL{lm-hpa <br> CPU-based HPA}
+    end
+  end
+
+  subgraph "Host / node filesystem"
+    Models[(models/ <br> local model artifacts)]
+  end
+
+  %% Traffic from clients to services
+  QC --> SvcC
+  LC --> SvcC
+  LL --> SvcL
+
+  %% Service to deployment (pods)
+  SvcC --> DepC
+  SvcL --> DepL
+
+  %% HPAs control deployments
+  HpaC --> DepC
+  HpaL --> DepL
+
+  %% Classifier deployment reads saved model from mounted volume
+  DepC --> Models
+```
+
+### 3.2 Repository layout
+
+```text
+.
+├── clients/                          # Load-test and query clients
+│   ├── load_test_classifier.py       # Drives classifier-service under load
+│   ├── load_test_lm.py               # Drives lm-service under load
+│   └── query_classifier.py           # Simple one-off classifier query
+├── k8s/
+│   ├── classifier/                   # Deployment, Service, HPA for classifier-service
+│   │   ├── deployment.yaml
+│   │   ├── hpa.yaml
+│   │   └── service.yaml
+│   └── lm/                           # Deployment, Service, HPA for lm-service
+│       ├── deployment.yaml
+│       ├── hpa.yaml
+│       └── service.yaml
+├── models/                           # Trained sklearn models (mounted into classifier pods)
+│   ├── mnist_rf_v1.joblib
+│   └── mnist_rf_v2.joblib
+├── README.md                         
+├── requirements.txt                  
+└── services/
+    ├── classifier-service/           # FastAPI + RandomForest inference service
+    │   ├── app.py
+    │   ├── Dockerfile
+    │   └── train_mnist_rf.py         # Offline training script for MNIST RF
+    └── lm-service/                   # FastAPI + GPT-style LM inference service
+        ├── app.py
+        └── Dockerfile
+```
 
 ---
 
