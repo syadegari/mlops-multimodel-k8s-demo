@@ -307,12 +307,12 @@ From the project root:
 ```bash
 # Activate your virtualenv / conda env if you use one
 python services/classifier-service/train_mnist_rf.py \
-  --n-estimators 100 \
+  --n-estimators 30 \
   --max-depth 10 \
   --version-id mnist_rf_v1
 
 python services/classifier-service/train_mnist_rf.py \
-  --n-estimators 200 \
+  --n-estimators 40 \
   --max-depth 12 \
   --version-id mnist_rf_v2
 ```
