@@ -161,6 +161,8 @@ flowchart LR
         └── Dockerfile
 ```
 
+**Note**: Initially and after checkout, `models` directory does not exist. It is created when the first model is trained. For details on training and registring models refer to section 8.3 of the document.
+
 ---
 
 ## 4. Containers
@@ -307,12 +309,12 @@ From the project root:
 ```bash
 # Activate your virtualenv / conda env if you use one
 python services/classifier-service/train_mnist_rf.py \
-  --n-estimators 30 \
+  --n-estimators 100 \
   --max-depth 10 \
   --version-id mnist_rf_v1
 
 python services/classifier-service/train_mnist_rf.py \
-  --n-estimators 40 \
+  --n-estimators 120 \
   --max-depth 12 \
   --version-id mnist_rf_v2
 ```
